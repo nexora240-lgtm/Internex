@@ -36,7 +36,7 @@ func DecodeProxyURL(encoded string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "ws" && parsed.Scheme != "wss" {
 		return "", false
 	}
 	return decoded, true
@@ -75,11 +75,10 @@ func RewriteSetCookieDomain(setCookie string, proxyHost string) string {
 	if strings.HasPrefix(ProxyOrigin, "http://") {
 		out = removeCookieAttr(out, "Secure")
 	}
-	// Append SameSite=None so cross-origin fetch still works inside
-	// the proxied page.
-	out += "; SameSite=None"
+	// SameSite=None requires Secure; avoid setting it for http proxies
+	// because the browser will ignore it.
 	if strings.HasPrefix(ProxyOrigin, "https://") {
-		out += "; Secure"
+		out += "; SameSite=None; Secure"
 	}
 	return out
 }

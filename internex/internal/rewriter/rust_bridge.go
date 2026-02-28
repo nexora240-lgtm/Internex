@@ -39,22 +39,22 @@ type rewriteInput struct {
 
 // RewriteHTML rewrites an HTML document through the Rust rewriter.
 func RewriteHTML(proxyOrigin, baseURL, content string) string {
-	return callRewrite(C.rewrite_html, proxyOrigin, baseURL, content)
+	return callRewrite("html", proxyOrigin, baseURL, content)
 }
 
 // RewriteCSS rewrites a CSS stylesheet through the Rust rewriter.
 func RewriteCSS(proxyOrigin, baseURL, content string) string {
-	return callRewrite(C.rewrite_css, proxyOrigin, baseURL, content)
+	return callRewrite("css", proxyOrigin, baseURL, content)
 }
 
 // RewriteJS rewrites JavaScript source through the Rust rewriter.
 func RewriteJS(proxyOrigin, baseURL, content string) string {
-	return callRewrite(C.rewrite_js, proxyOrigin, baseURL, content)
+	return callRewrite("js", proxyOrigin, baseURL, content)
 }
 
 // callRewrite marshals the input into JSON, calls the given Rust FFI function,
 // converts the result back to a Go string, and frees the Rust-allocated memory.
-func callRewrite(ffi func(*C.char) *C.char, proxyOrigin, baseURL, content string) string {
+func callRewrite(kind string, proxyOrigin, baseURL, content string) string {
 	payload, err := json.Marshal(rewriteInput{
 		ProxyOrigin: proxyOrigin,
 		BaseURL:     baseURL,
@@ -67,7 +67,17 @@ func callRewrite(ffi func(*C.char) *C.char, proxyOrigin, baseURL, content string
 	cInput := C.CString(string(payload))
 	defer C.free(unsafe.Pointer(cInput))
 
-	cResult := ffi(cInput)
+	var cResult *C.char
+	switch kind {
+	case "html":
+		cResult = C.rewrite_html(cInput)
+	case "css":
+		cResult = C.rewrite_css(cInput)
+	case "js":
+		cResult = C.rewrite_js(cInput)
+	default:
+		return content
+	}
 	if cResult == nil {
 		return content
 	}
@@ -94,11 +104,11 @@ func Rewrite(kind ContentKind, src io.Reader) (io.Reader, error) {
 	var result string
 	switch kind {
 	case HTML:
-		result = callRewrite(C.rewrite_html, proxyOrigin, baseURL, content)
+		result = callRewrite("html", proxyOrigin, baseURL, content)
 	case CSS:
-		result = callRewrite(C.rewrite_css, proxyOrigin, baseURL, content)
+		result = callRewrite("css", proxyOrigin, baseURL, content)
 	case JS:
-		result = callRewrite(C.rewrite_js, proxyOrigin, baseURL, content)
+		result = callRewrite("js", proxyOrigin, baseURL, content)
 	default:
 		result = content
 	}

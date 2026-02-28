@@ -3,6 +3,7 @@ package transport
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,33 +39,47 @@ var httpClient = &http.Client{
 	},
 }
 
-// FetchUpstream sends an HTTP GET to targetURL, forwarding only safe
+// FetchUpstream sends a request to targetURL, forwarding only safe
 // headers and rewriting Host, Origin, and Referer to match the
-// upstream target.  It supports streaming responses and WebSocket
+// upstream target. It supports streaming responses and WebSocket
 // upgrade requests.
-func FetchUpstream(targetURL string, headers http.Header) (*http.Response, error) {
-	return fetchInternal(targetURL, headers, "")
+func FetchUpstream(targetURL, method string, headers http.Header, body io.Reader) (*http.Response, error) {
+	return fetchInternal(targetURL, method, headers, body, "")
 }
 
 // FetchUpstreamWithCookies is like FetchUpstream but additionally
 // attaches the provided cookie header from the session store.
-func FetchUpstreamWithCookies(targetURL string, headers http.Header, cookieHeader string) (*http.Response, error) {
-	return fetchInternal(targetURL, headers, cookieHeader)
+func FetchUpstreamWithCookies(targetURL, method string, headers http.Header, body io.Reader, cookieHeader string) (*http.Response, error) {
+	return fetchInternal(targetURL, method, headers, body, cookieHeader)
 }
 
-func fetchInternal(targetURL string, headers http.Header, cookieHeader string) (*http.Response, error) {
+func fetchInternal(targetURL, method string, headers http.Header, body io.Reader, cookieHeader string) (*http.Response, error) {
 	parsed, err := url.Parse(targetURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing target URL: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	// WebSocket schemes must be translated to HTTP(S) for the handshake.
+	requestURL := targetURL
+	if parsed.Scheme == "ws" || parsed.Scheme == "wss" {
+		parsed.Scheme = map[string]string{"ws": "http", "wss": "https"}[parsed.Scheme]
+		requestURL = parsed.String()
+	}
+
+	if method == "" {
+		method = http.MethodGet
+	}
+
+	req, err := http.NewRequest(method, requestURL, body)
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}
 
 	// ---- safe headers ----
 	forwardHeaders(req.Header, headers)
+
+	// Always avoid compressed responses for rewritable content.
+	req.Header.Set("Accept-Encoding", "identity")
 
 	// ---- rewrite Host / Origin / Referer to upstream ----
 	req.Host = parsed.Host

@@ -4,9 +4,15 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"internex/internal/rewriter"
 )
+
+// AssetsDir is the path to the assets directory.  Set by cmd/server/main.go.
+var AssetsDir string
 
 // NewMux returns an http.ServeMux wired with all proxy / rewrite routes.
 func NewMux() *http.ServeMux {
@@ -15,6 +21,7 @@ func NewMux() *http.ServeMux {
 	mux.HandleFunc("POST /rewrite/html", handleRewriteHTML)
 	mux.HandleFunc("POST /rewrite/css", handleRewriteCSS)
 	mux.HandleFunc("POST /rewrite/js", handleRewriteJS)
+	mux.HandleFunc("/", handleStatic)
 	return mux
 }
 
@@ -39,7 +46,7 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Attach per-origin cookies from our session store.
 	cookieHeader := DefaultSessions.CookieHeader(origin)
 
-	resp, err := FetchUpstreamWithCookies(targetURL, r.Header, cookieHeader)
+	resp, err := FetchUpstreamWithCookies(targetURL, r.Method, r.Header, r.Body, cookieHeader)
 	if err != nil {
 		log.Printf("proxy fetch error: %v", err)
 		http.Error(w, "upstream fetch failed", http.StatusBadGateway)
@@ -62,6 +69,11 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Detect content type and decide whether to rewrite.
 	contentType := DetectContentType(resp.Header)
 	category := Categorize(contentType)
+
+	if r.Method == http.MethodHead {
+		w.WriteHeader(resp.StatusCode)
+		return
+	}
 
 	if category == ContentOther {
 		// Not a rewritable type — stream straight through.
@@ -191,4 +203,44 @@ func rewriteBodyDirect(w http.ResponseWriter, r *http.Request, kind string) {
 
 	io.WriteString(w, result)
 }
+
+// ---------- Static file serving ----------
+
+var mimeTypes = map[string]string{
+	".html": "text/html; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
+	".js":   "application/javascript; charset=utf-8",
+	".json": "application/json; charset=utf-8",
+	".png":  "image/png",
+	".svg":  "image/svg+xml",
+	".ico":  "image/x-icon",
+}
+
+func handleStatic(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Path
+	if p == "/" {
+		p = "/index.html"
+	}
+
+	// Strip leading "/" and prevent directory traversal.
+	clean := filepath.Clean(strings.TrimPrefix(p, "/"))
+	if strings.Contains(clean, "..") {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	fullPath := filepath.Join(AssetsDir, clean)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	ext := filepath.Ext(fullPath)
+	ct, ok := mimeTypes[ext]
+	if !ok {
+		ct = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Write(data)
 }

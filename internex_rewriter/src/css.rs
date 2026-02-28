@@ -12,7 +12,7 @@
 //   CSSOM sinks: insertRule, replace, replaceSync, cssRules
 
 use cssparser::{
-    Parser, ParserInput, Token, CowRcStr,
+    Parser, ParserInput, Token,
 };
 
 use crate::url::encode_url_with_base;
@@ -124,7 +124,7 @@ fn rewrite_token_stream(
             // ---- Blocks ----
             Token::CurlyBracketBlock => {
                 out.push('{');
-                let _ = parser.parse_nested_block(|inner| -> Result<(), ()> {
+                let _ = parser.parse_nested_block(|inner| -> Result<(), cssparser::ParseError<'_, ()>> {
                     rewrite_token_stream(inner, proxy, base, out);
                     Ok(())
                 });
@@ -133,7 +133,7 @@ fn rewrite_token_stream(
 
             Token::ParenthesisBlock => {
                 out.push('(');
-                let _ = parser.parse_nested_block(|inner| -> Result<(), ()> {
+                let _ = parser.parse_nested_block(|inner| -> Result<(), cssparser::ParseError<'_, ()>> {
                     rewrite_token_stream(inner, proxy, base, out);
                     Ok(())
                 });
@@ -142,7 +142,7 @@ fn rewrite_token_stream(
 
             Token::SquareBracketBlock => {
                 out.push('[');
-                let _ = parser.parse_nested_block(|inner| -> Result<(), ()> {
+                let _ = parser.parse_nested_block(|inner| -> Result<(), cssparser::ParseError<'_, ()>> {
                     rewrite_token_stream(inner, proxy, base, out);
                     Ok(())
                 });
@@ -153,7 +153,7 @@ fn rewrite_token_stream(
             Token::Function(ref name) => {
                 out.push_str(name.as_ref());
                 out.push('(');
-                let _ = parser.parse_nested_block(|inner| -> Result<(), ()> {
+                let _ = parser.parse_nested_block(|inner| -> Result<(), cssparser::ParseError<'_, ()>> {
                     rewrite_token_stream(inner, proxy, base, out);
                     Ok(())
                 });
@@ -222,7 +222,7 @@ fn rewrite_function_args(
     out: &mut String,
     is_url_context: bool,
 ) {
-    let _ = parser.parse_nested_block(|inner| -> Result<(), ()> {
+    let _ = parser.parse_nested_block(|inner| -> Result<(), cssparser::ParseError<'_, ()>> {
         loop {
             let tok = match inner.next_including_whitespace_and_comments() {
                 Ok(t) => t.clone(),

@@ -8,10 +8,10 @@
 use kuchikiki::traits::*;
 use kuchikiki::{parse_html, NodeRef, NodeData};
 use html5ever::serialize::{serialize, SerializeOpts};
-use html5ever::QualName;
-use markup5ever::{local_name, ns, namespace_url};
+use markup5ever::{ns, namespace_url};
+use serde_json;
 
-use crate::url::{encode_url, encode_url_with_base};
+use crate::url::encode_url_with_base;
 use crate::css::rewrite_css_string;
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ pub fn rewrite_html(proxy_origin: &str, base_url: &str, html: &str) -> String {
     let effective_base = find_base_href(&doc).unwrap_or_else(|| base_url.to_string());
 
     walk(&doc, proxy_origin, &effective_base);
-    inject_client_script(&doc, proxy_origin);
+    inject_client_script(&doc, proxy_origin, &effective_base);
 
     let mut buf = Vec::new();
     serialize(
@@ -270,9 +270,10 @@ fn rewrite_svg_attrs(
             }
             // Strip url(...) wrapper if present.
             let inner = if val.starts_with("url(") && val.ends_with(')') {
-                &val[4..val.len() - 1].trim().trim_matches(|c| c == '\'' || c == '"')
+                let raw = &val[4..val.len() - 1];
+                raw.trim().trim_matches(|c| c == '\'' || c == '"')
             } else {
-                &val
+                val.as_str()
             };
             if inner.starts_with('#') {
                 continue;
@@ -366,10 +367,12 @@ fn find_base_href(doc: &NodeRef) -> Option<String> {
 
 /// Inject a tiny <script> at the top of <head> that sets up the runtime
 /// hooks the rewritten inline scripts and event handlers depend on.
-fn inject_client_script(doc: &NodeRef, proxy_origin: &str) {
-    let script_src = format!("{}/internex-runtime.js", proxy_origin);
+fn inject_client_script(doc: &NodeRef, proxy_origin: &str, base_url: &str) {
+    let script_src = format!("{}/internex.runtime.js", proxy_origin);
+    let base_json = serde_json::to_string(base_url).unwrap_or_else(|_| "\"\"".to_string());
     let script_html = format!(
-        r#"<script src="{}"></script>"#,
+        r#"<script>window.__internex_base = {};</script><script src="{}"></script>"#,
+        base_json,
         script_src,
     );
 
@@ -445,6 +448,6 @@ mod tests {
     fn injects_runtime_script() {
         let html = "<html><head></head><body></body></html>";
         let result = rewrite_html(PROXY, BASE, html);
-        assert!(result.contains("internex-runtime.js"));
+        assert!(result.contains("internex.runtime.js"));
     }
 }

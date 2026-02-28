@@ -108,12 +108,12 @@ pub unsafe extern "C" fn rewrite_js(input: *const c_char) -> *mut c_char {
         Some(s) => s,
         None => return ptr::null_mut(),
     };
-    let (proxy_origin, _base_url, content) = match parse_input(json) {
+    let (proxy_origin, base_url, content) = match parse_input(json) {
         Some(t) => t,
         None => return ptr::null_mut(),
     };
 
-    let result = js::rewrite_js(&proxy_origin, &content);
+    let result = js::rewrite_js(&proxy_origin, &base_url, &content);
     to_c_string(result)
 }
 
