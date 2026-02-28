@@ -91,6 +91,10 @@
   var _setAttributeNS   = Element.prototype.setAttributeNS;
   var _getAttribute     = Element.prototype.getAttribute;
   var _getAttributeNS   = Element.prototype.getAttributeNS;
+  var _formSubmit       = HTMLFormElement && HTMLFormElement.prototype
+                            ? HTMLFormElement.prototype.submit : null;
+  var _formRequestSubmit = HTMLFormElement && HTMLFormElement.prototype
+                            ? HTMLFormElement.prototype.requestSubmit : null;
   var _insertAdjacentHTML = Element.prototype.insertAdjacentHTML;
   var _docWrite         = document.write;
   var _docWriteln       = document.writeln;
@@ -185,6 +189,20 @@
 
     // Absolute  http(s)://… or ws(s)://…
     if (/^(https?|wss?):\/\//i.test(s)) {
+      // If a script constructed a proxy-origin absolute URL, remap to upstream.
+      // Compare host (ignoring protocol) because pages may construct https://
+      // URLs even though the proxy serves plain http.
+      try {
+        var abs = new URL(s);
+        var proxyHostLower = new URL(PROXY_ORIGIN).host.toLowerCase();
+        if (abs.host.toLowerCase() === proxyHostLower) {
+          var bo = getBaseOrigin();
+          if (bo) {
+            var remap = new URL(abs.pathname + abs.search + abs.hash, bo);
+            return "/proxy?url=" + encodeURIComponent(remap.href);
+          }
+        }
+      } catch (_) { /* ignore */ }
       return "/proxy?url=" + encodeURIComponent(s);
     }
 
@@ -477,8 +495,8 @@
     // Special: <base href> must NOT be proxied.
     if (lower === "href" && this.tagName === "BASE") {
       try {
-        BASE_URL    = value;
-        BASE_ORIGIN = new URL(value).origin;
+        var abs = resolveAbsolute(String(value || ""));
+        if (abs) setBase(abs);
       } catch (_) { /* */ }
       return _setAttribute.call(this, name, value);
     }
@@ -802,6 +820,31 @@
       _setAttribute.call(form, "action", rewriteUrl(action));
     }
   }, true);
+
+  // Programmatic form submission (form.submit() / requestSubmit())
+  if (_formSubmit) {
+    HTMLFormElement.prototype.submit = function () {
+      try {
+        var action = _getAttribute.call(this, "action");
+        if (action && !isProxied(action)) {
+          _setAttribute.call(this, "action", rewriteUrl(action));
+        }
+      } catch (_) { /* ignore */ }
+      return _formSubmit.apply(this, arguments);
+    };
+  }
+
+  if (_formRequestSubmit) {
+    HTMLFormElement.prototype.requestSubmit = function () {
+      try {
+        var action = _getAttribute.call(this, "action");
+        if (action && !isProxied(action)) {
+          _setAttribute.call(this, "action", rewriteUrl(action));
+        }
+      } catch (_) { /* ignore */ }
+      return _formRequestSubmit.apply(this, arguments);
+    };
+  }
 
   // postMessage
   window.postMessage = function (msg, origin, transfer) {

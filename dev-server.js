@@ -29,7 +29,11 @@ function decodeProxyUrl(raw) {
   if (!raw) return "";
   const idx = raw.indexOf("/proxy?url=");
   if (idx === -1) return "";
-  const encoded = raw.slice(idx + 11);
+  let encoded = raw.slice(idx + 11);
+  const amp = encoded.indexOf("&");
+  if (amp !== -1) encoded = encoded.slice(0, amp);
+  const hash = encoded.indexOf("#");
+  if (hash !== -1) encoded = encoded.slice(0, hash);
   try { return decodeURIComponent(encoded); } catch { return ""; }
 }
 
@@ -65,6 +69,8 @@ function serveStatic(req, res) {
 // ── Runtime script tag to inject ──
 const RUNTIME_TAG = `<script>window.__internex_base = %BASE_JSON%;</script>\n<script src="/internex.runtime.js"></script>\n`;
 
+const PROXY_HOST = `localhost:${PORT}`;
+
 function resolveProxyUrl(rawUrl, baseUrl) {
   if (!rawUrl) return rawUrl;
   const s = String(rawUrl).trim();
@@ -79,6 +85,15 @@ function resolveProxyUrl(rawUrl, baseUrl) {
     return "/proxy?url=" + encodeURIComponent(scheme + s);
   }
   if (/^(https?|wss?):\/\//i.test(s)) {
+    // Remap proxy-origin URLs (any protocol) to upstream origin.
+    try {
+      const abs = new URL(s);
+      if (abs.host.toLowerCase() === PROXY_HOST && baseUrl) {
+        const base = new URL(baseUrl);
+        const remapped = new URL(abs.pathname + abs.search + abs.hash, base.origin);
+        return "/proxy?url=" + encodeURIComponent(remapped.href);
+      }
+    } catch { /* ignore */ }
     return "/proxy?url=" + encodeURIComponent(s);
   }
   if (s.startsWith("/")) {
@@ -125,8 +140,7 @@ function contentCategory(headers) {
 }
 
 function proxyRequest(req, res) {
-  const parsed  = url.parse(req.url, true);
-  const target  = parsed.query.url;
+  let target = decodeProxyUrl(req.url || "");
 
   if (!target) {
     res.writeHead(400);
@@ -134,13 +148,35 @@ function proxyRequest(req, res) {
     return;
   }
 
+  // Safety: if the target points back at our own proxy (any protocol),
+  // remap to the Referer-derived upstream origin so we don't loop.
+  try {
+    const t = new URL(target);
+    if (t.host.toLowerCase() === PROXY_HOST) {
+      // Try to recover the upstream origin from the Referer header.
+      const ref = req.headers["referer"] || "";
+      const upBase = decodeProxyUrl(ref);
+      if (upBase) {
+        const upOrigin = new URL(upBase).origin;
+        target = upOrigin + t.pathname + t.search + t.hash;
+      }
+    }
+  } catch { /* ignore */ }
+
+  const normalizedTarget = encodeURI(target);
+
   let targetUrl;
   try {
-    targetUrl = new URL(target);
+    targetUrl = new URL(normalizedTarget);
   } catch {
-    res.writeHead(400);
-    res.end("Invalid URL");
-    return;
+    try {
+      // Attempt to salvage URLs containing unescaped characters.
+      targetUrl = new URL(encodeURI(target));
+    } catch {
+      res.writeHead(400);
+      res.end("Invalid URL");
+      return;
+    }
   }
 
   if (targetUrl.protocol !== "http:" && targetUrl.protocol !== "https:") {
@@ -164,10 +200,9 @@ function proxyRequest(req, res) {
   const decodedRef = decodeProxyUrl(ref);
   headers["referer"] = decodedRef || target;
 
-  const proxyReq = lib.request(target, {
+  const proxyReq = lib.request(normalizedTarget, {
     method: req.method,
     headers,
-    ALPNProtocols: ["http/1.1"],
   }, (upRes) => {
     // Follow redirects manually (up to 5 hops).
     if ([301, 302, 303, 307, 308].includes(upRes.statusCode) && upRes.headers["location"]) {
@@ -272,6 +307,75 @@ const server = http.createServer((req, res) => {
   } else {
     serveStatic(req, res);
   }
+});
+
+// ── WebSocket upgrade handler ──
+server.on("upgrade", (req, socket, head) => {
+  const target = decodeProxyUrl(req.url || "");
+  if (!target) {
+    socket.destroy();
+    return;
+  }
+
+  let targetUrl;
+  try {
+    // Normalise ws(s):// into the URL object.
+    targetUrl = new URL(target);
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  // ws/wss → use the appropriate net module.
+  const useTls = targetUrl.protocol === "wss:" || targetUrl.protocol === "https:";
+  const net = require("net");
+  const tls = require("tls");
+  const defaultPort = useTls ? 443 : 80;
+  const port = parseInt(targetUrl.port, 10) || defaultPort;
+
+  // Build the raw HTTP upgrade request to send upstream.
+  let path = targetUrl.pathname + targetUrl.search;
+  let rawRequest = `GET ${path} HTTP/1.1\r\n`;
+  rawRequest += `Host: ${targetUrl.host}\r\n`;
+
+  // Forward WebSocket headers.
+  const wsHeaders = [
+    "upgrade", "connection", "sec-websocket-key",
+    "sec-websocket-version", "sec-websocket-extensions",
+    "sec-websocket-protocol", "origin", "user-agent",
+  ];
+  for (const h of wsHeaders) {
+    if (req.headers[h]) {
+      const name = h.replace(/(^|-)(\w)/g, (_, p, c) => (p ? "-" : "") + c.toUpperCase());
+      let val = req.headers[h];
+      // Rewrite Origin to match upstream.
+      if (h === "origin") val = targetUrl.origin;
+      rawRequest += `${name}: ${val}\r\n`;
+    }
+  }
+  rawRequest += "\r\n";
+
+  const connectOpts = { host: targetUrl.hostname, port, servername: targetUrl.hostname };
+
+  const upSocket = useTls ? tls.connect(connectOpts) : net.connect(connectOpts);
+
+  upSocket.on("connect", () => {
+    upSocket.write(rawRequest);
+    if (head && head.length) upSocket.write(head);
+
+    // Pipe the 101 response and all subsequent frames back to the browser.
+    upSocket.pipe(socket);
+    socket.pipe(upSocket);
+  });
+
+  upSocket.on("error", (err) => {
+    console.error("WebSocket upstream error:", err.message);
+    socket.destroy();
+  });
+
+  socket.on("error", () => upSocket.destroy());
+  socket.on("close", () => upSocket.destroy());
+  upSocket.on("close", () => socket.destroy());
 });
 
 server.listen(PORT, () => {
