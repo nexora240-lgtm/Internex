@@ -1,0 +1,23 @@
+[package]
+name = "internex_rewriter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+html5ever = "0.27"
+kuchikiki = "0.8"
+cssparser = "0.34"
+url = "2"
+serde_json = "1"
+swc_ecma_parser = "0.149"
+swc_ecma_ast = "0.117"
+swc_ecma_visit = "0.103"
+swc_common = { version = "0.37", features = ["sourcemap"] }
+swc_ecma_codegen = "0.153"
+markup5ever = "0.12"
+log = "0.4"
+base64 = "0.22"
+percent-encoding = "2"

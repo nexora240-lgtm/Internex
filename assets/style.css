@@ -1,0 +1,80 @@
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: #0e0e10;
+  color: #e4e4e7;
+}
+
+/* ── Toolbar ── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 12px;
+  background: #18181b;
+  border-bottom: 1px solid #27272a;
+}
+
+#logo {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: #a78bfa;
+  flex-shrink: 0;
+}
+
+#url-form {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+}
+
+#url-input {
+  flex: 1;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  background: #09090b;
+  color: #e4e4e7;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+#url-input:focus {
+  border-color: #a78bfa;
+}
+
+#go-btn {
+  height: 32px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 6px;
+  background: #7c3aed;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#go-btn:hover {
+  background: #6d28d9;
+}
+
+/* ── Iframe ── */
+#proxy-frame {
+  display: block;
+  width: 100%;
+  height: calc(100% - 48px);
+  border: none;
+  background: #fff;
+}

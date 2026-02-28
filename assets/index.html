@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Internex</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav id="toolbar">
+    <span id="logo">Internex</span>
+    <form id="url-form">
+      <input
+        id="url-input"
+        type="text"
+        placeholder="Enter a URL…"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <button type="submit" id="go-btn">Go</button>
+    </form>
+  </nav>
+  <iframe id="proxy-frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups"></iframe>
+  <script src="app.js"></script>
+</body>
+</html>
